@@ -1,0 +1,321 @@
+---
+
+# Connecting to the DB after creation:  https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Aurora.Connecting.html
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation template for an RDS Aurora cluster.
+Parameters:
+    DatabaseInstanceType:
+        Default: db.t2.small
+        AllowedValues:
+            - db.t2.small
+            - db.t2.medium
+            - db.r3.large
+            - db.r3.xlarge
+            - db.r3.2xlarge
+            - db.r3.4xlarge
+            - db.r3.8xlarge
+        Description: The instance type to use for the database.
+        Type: String
+    DatabasePassword:
+        AllowedPattern: "[a-zA-Z0-9]+"
+        ConstraintDescription: must contain only alphanumeric characters.
+        Description: The database admin account password.
+        MaxLength: '41'
+        MinLength: '8'
+        NoEcho: 'true'
+        Type: String
+    DatabaseUsername:
+        AllowedPattern: "[a-zA-Z0-9]+"
+        ConstraintDescription: must contain only alphanumeric characters.
+        Description: The database admin account user name.
+        MaxLength: '16'
+        MinLength: '1'
+        Type: String
+    DatabaseName:
+        AllowedPattern: "[a-zA-Z0-9]+"
+        ConstraintDescription: must contain only alphanumeric characters.
+        Description: The database name.
+        MaxLength: '16'
+        MinLength: '1'
+        Type: String
+    DatabaseBackupRetentionPeriod:
+        Type: String
+        Default: 7
+        AllowedValues:
+            - 1
+            - 7
+        Description: The database backup retention period in days.
+    NetworkStack:
+        Description: Name of an existing CloudFormation stack where the server will be deployed
+        Type: String
+    AlarmEmailAddress:
+        AllowedPattern: "[a-zA-Z0-9@_.]+"
+        ConstraintDescription: Be a valid email address.
+        Description: The alarm email address.
+        MaxLength: '64'
+        MinLength: '7'
+        Type: String
+    Production:
+      Description: Set to true if this is a production environment
+      Type: String
+      Default: 'false'
+      AllowedValues:
+      - 'true'
+      - 'false'
+    CostCenter:
+      Description: Select the appropriate cost center
+      Type: String
+      Default: development
+      AllowedValues:
+      - development
+      - test
+      - production
+    Project:
+        Description: Name of the project
+        Type: String
+        Default: ProjectName
+    CreatedBy:
+        Description: Name of the creator
+        Type: String
+        Default: Unknown
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                default: Database Configuration
+              Parameters:
+                - DatabaseInstanceType
+                - DatabaseName
+                - DatabaseUsername
+                - DatabasePassword
+                - DatabaseBackupRetentionPeriod
+        ParameterLabels:
+            DatabaseInstanceType:
+                default: Database Instance Type
+            DatabasePassword:
+                default: Database Password
+            DatabaseUsername:
+                default: Database Username
+            DatabaseBackupRetentionPeriod:
+                default: Database Backup Retention Period
+            NetworkStack:
+                default: Database VPC
+Resources:
+    StackAlarmTopic:
+        Type: AWS::SNS::Topic
+        Properties:
+            DisplayName: ${AWS::StackName} Alarm Topic
+            Subscription:
+            - Endpoint:
+                Ref: AlarmEmailAddress
+              Protocol: email
+    DatabaseSubnetGroup:
+        Type: AWS::RDS::DBSubnetGroup
+        Properties:
+            DBSubnetGroupDescription: CloudFormation managed DB subnet group.
+            SubnetIds:
+                - Fn::ImportValue:
+                        Fn::Sub: "${NetworkStack}-PrivateSubnet1"
+                - Fn::ImportValue:
+                        Fn::Sub: "${NetworkStack}-PrivateSubnet2"
+                - Fn::ImportValue:
+                        Fn::Sub: "${NetworkStack}-PrivateSubnet3"
+    DatabaseCluster:
+        Type: AWS::RDS::DBCluster
+        Properties:
+            Engine: aurora
+            DatabaseName:
+                Ref: DatabaseName
+            MasterUsername:
+                Ref: DatabaseUsername
+            MasterUserPassword:
+                Ref: DatabasePassword
+            BackupRetentionPeriod:
+                Ref: DatabaseBackupRetentionPeriod
+            PreferredBackupWindow: 02:00-03:00
+            PreferredMaintenanceWindow: mon:03:00-mon:04:00
+            DBSubnetGroupName:
+                Ref: DatabaseSubnetGroup
+            VpcSecurityGroupIds:
+                - Fn::ImportValue:
+                        Fn::Sub: "${NetworkStack}-SecurityGroup"
+    DatabasePrimaryInstance:
+        Type: AWS::RDS::DBInstance
+        Properties:
+            Engine: aurora
+            PubliclyAccessible: 'false'
+            DBClusterIdentifier:
+                Ref: DatabaseCluster
+            DBInstanceClass:
+                Ref: DatabaseInstanceType
+            DBSubnetGroupName:
+                Ref: DatabaseSubnetGroup
+            Tags:
+              - Key: CostCenter
+                Value:
+                  Ref: CostCenter
+              - Key: CreatedBy
+                Value:
+                  Ref: CreatedBy
+              - Key: Project
+                Value:
+                  Ref: Project
+              - Key: Production
+                Value:
+                  Ref: Production            
+    DatabaseReplicaInstance:
+        Type: AWS::RDS::DBInstance
+        Properties:
+            Engine: aurora
+            PubliclyAccessible: 'false'
+            DBClusterIdentifier:
+                Ref: DatabaseCluster
+            DBInstanceClass:
+                Ref: DatabaseInstanceType
+            DBSubnetGroupName:
+                Ref: DatabaseSubnetGroup
+            Tags:
+              - Key: CostCenter
+                Value:
+                  Ref: CostCenter
+              - Key: CreatedBy
+                Value:
+                  Ref: CreatedBy
+              - Key: Project
+                Value:
+                  Ref: Project
+              - Key: Production
+                Value:
+                  Ref: Production            
+    DatabasePrimaryCPUAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Primary database CPU utilization is over 80%.
+            Namespace: AWS/RDS
+            MetricName: CPUUtilization
+            Unit: Percent
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 80
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabasePrimaryInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+            InsufficientDataActions:
+                - Ref: StackAlarmTopic
+    DatabaseReplicaCPUAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Replica database CPU utilization is over 80%.
+            Namespace: AWS/RDS
+            MetricName: CPUUtilization
+            Unit: Percent
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 80
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabaseReplicaInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+            InsufficientDataActions:
+                - Ref: StackAlarmTopic
+    DatabasePrimaryMemoryAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Primary database freeable memory is under 700MB.
+            Namespace: AWS/RDS
+            MetricName: FreeableMemory
+            Unit: Bytes
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 700000000
+            ComparisonOperator: LessThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabasePrimaryInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+            InsufficientDataActions:
+                - Ref: StackAlarmTopic
+    DatabasePrimaryMemoryAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Replica database freeable memory is under 700MB.
+            Namespace: AWS/RDS
+            MetricName: FreeableMemory
+            Unit: Bytes
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 700000000
+            ComparisonOperator: LessThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabaseReplicaInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+            InsufficientDataActions:
+                - Ref: StackAlarmTopic
+    DatabasePrimaryReplicationAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Database replication latency is over 200ms.
+            Namespace: AWS/RDS
+            MetricName: AuroraReplicaLag
+            Unit: Milliseconds
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 200
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabaseReplicaInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+    DatabaseReplicaReplicationAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmDescription: Database replication latency is over 200ms.
+            Namespace: AWS/RDS
+            MetricName: AuroraReplicaLag
+            Unit: Milliseconds
+            Statistic: Average
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: 200
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value:
+                      Ref: DatabaseReplicaInstance
+            AlarmActions:
+                - Ref: StackAlarmTopic
+Outputs:
+  EndpointAddress:
+    Description: Address of the Database Endpoint
+    Value:
+      Fn::GetAtt:
+        - DatabaseCluster
+        - Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-DbEndpointAddress
+  DatabaseName:
+    Description: Name of the database
+    Value:
+      Ref: DatabaseName
+    Export:
+      Name: !Sub ${AWS::StackName}-DbName

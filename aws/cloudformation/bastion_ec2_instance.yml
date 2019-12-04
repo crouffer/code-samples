@@ -1,0 +1,238 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon Linux AMI on EC2 - Bastion/Build-server for accessing VPC Cluster and Instances
+Parameters:
+  NetworkStack:
+    Description: Name of an existing CloudFormation stack where the server will
+      be deployed
+    Type: String
+    Default: MyVpcStack
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  Production:
+    Description: Set to true if this is a production environment
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  CostCenter:
+      Description: Select the appropriate cost center
+      Type: String
+    Default: development
+    AllowedValues:
+    - development
+    - test
+    - production
+  Project:
+    Description: Name of the project
+    Type: String
+    Default: MyProjectName
+  CreatedBy:
+    Description: Name of the creator
+    Type: String
+    Default: Unknown
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+    - t2.nano
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - m4.large
+    - m4.xlarge
+    ConstraintDescription: must be a supported standard instance type for the Amazon Linux AMI
+Mappings:
+  AWSInstanceType2Arch:
+    t2.nano:
+      Arch: HVM64
+    t2.micro:
+      Arch: HVM64
+    t2.small:
+      Arch: HVM64
+    t2.medium:
+      Arch: HVM64
+    t2.large:
+      Arch: HVM64
+    t2.xlarge:
+      Arch: HVM64
+    t2.2xlarge:
+      Arch: HVM64
+    m4.large:
+      Arch: HVM64
+    m4.xlarge:
+      Arch: HVM64
+  AWSRegionArch2AMI:
+    us-east-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-cb9ec1b1
+      HVMG2: NOT_SUPPORTED
+    us-east-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-caaf84af
+      HVMG2: NOT_SUPPORTED
+Resources:
+  BastionEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref BastionServer
+  BastionServer:
+    Type: AWS::EC2::Instance
+    DependsOn:
+    - BastionInstanceRole
+    - IamInstanceProfile
+    Metadata:
+      'AWS::CloudFormation::Init':
+        config:
+          files:
+            /tmp/test.txt:
+              content: Hello world!
+              mode: '000755'
+              owner: root
+              group: root
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT5M
+    Properties:
+      ImageId:
+        Fn::FindInMap:
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - Fn::FindInMap:
+          - AWSInstanceType2Arch
+          - Ref: InstanceType
+          - Arch
+      InstanceType:
+        Ref: InstanceType
+      IamInstanceProfile:
+        !Ref IamInstanceProfile
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash -x
+            - |
+              # Running security updates
+            - 'yum -y --security update'
+            - |+
+
+            - |
+              # Install docker
+            - 'yum -y install docker'
+            - |+
+
+            - |
+              # Run docker
+            - 'service docker start'
+            - |+
+
+            - |
+              # Install docker-py
+            - 'pip install docker-py'
+            - |+
+
+            - |
+              # Install the files and packages from the metadata
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource BastionServer '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+            - |
+              # Signal the status from cfn-init
+            - '/opt/aws/bin/cfn-signal -e $? '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource BastionServer '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
+      KeyName:
+        Ref: KeyName
+      BlockDeviceMappings:
+      - DeviceName: '/dev/xvda'
+        Ebs:
+          VolumeType: gp2
+          DeleteOnTermination: 'false'
+          VolumeSize: '120'
+
+      Tags:
+      - Key: Name
+        Value: !Sub ${NetworkStack}-BastionServer
+      - Key: CostCenter
+        Value:
+          Ref: CostCenter
+      - Key: CreatedBy
+        Value:
+          Ref: CreatedBy
+      - Key: Project
+        Value:
+          Ref: Project
+      - Key: Production
+        Value:
+          Ref: Production
+      - Key: Application
+        Value:
+          Ref: AWS::StackId
+      NetworkInterfaces:
+      - GroupSet:
+        - Fn::ImportValue:
+            Fn::Sub: "${NetworkStack}-SecurityGroup"
+        AssociatePublicIpAddress: 'true'
+        DeviceIndex: 0
+        DeleteOnTermination: 'true'
+        SubnetId:
+          Fn::ImportValue:
+            Fn::Sub: "${NetworkStack}-PublicSubnet1"
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: '/'
+      Roles:
+      - !Ref BastionInstanceRole
+  BastionInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AdministratorAccess
+      # - arn:aws:iam::aws:policy/AmazonECS_FullAccess
+      # - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+      Path: /
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:DescribeLogStreams
+            Effect: Allow
+            Resource: arn:aws:logs:*:*:*
+          Version: 2012-10-17
+        PolicyName: cloudWatchLogsPolicy
+Outputs:
+  BastionServerAddress:
+    Description: EC2 Bastion Server Instance Address
+    Value:
+      Fn::GetAtt:
+        - BastionServer
+        - PublicDnsName
+    Export:
+      Name: !Sub ${NetworkStack}-BastionServerAddress  

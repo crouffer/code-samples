@@ -1,0 +1,734 @@
+# http://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_VPC.Scenarios.html#USER_VPC.Scenario4
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Entire VPC, consisting of public and private subnets
+Parameters:
+  VPCCIDR:
+    Type: String
+    Description: IP Address range for the VPC
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 192.168.0.0/16
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PublicSubnet1CIDR:
+    Type: String
+    Description: IP Address range for the Public Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 192.168.10.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PublicSubnet2CIDR:
+    Type: String
+    Description: IP Address range for the Public Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 192.168.11.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PrivateSubnet1CIDR:
+    Type: String
+    Description: IP Address range for the first Private Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 192.168.12.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PrivateSubnet2CIDR:
+    Type: String
+    Description: IP Address range for the second Private Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 192.168.13.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.Se
+  PrivateSubnet3CIDR:
+    Type: String
+    Description: IP Address range for the third Private Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 172.32.109.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  SSHLocation:
+    Description: IP address or range that can be used to SSH or RDP to the EC2
+      instances"
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 111.222.333.444/32
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  Production:
+    Description: Set to true if this is a production environment
+    Type: String
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  CostCenter:
+    Description: Select the appropriate cost center
+    Type: String
+    Default: development
+    AllowedValues:
+    - test
+    - production
+  Project:
+    Description: Name of the project
+    Type: String
+    Default: MyProject
+  CreatedBy:
+    Description: Name of the creator
+    Type: String
+    Default: "CI/CD Server"
+Resources:
+  vpcResource:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      InstanceTenancy: default
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  eipResource:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain:
+        Ref: vpcResource
+  publicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: us-east-2a
+      MapPublicIpOnLaunch: true
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value: Public1
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  publicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PublicSubnet2CIDR
+      AvailabilityZone: us-east-2b
+      MapPublicIpOnLaunch: true
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value: Public2
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  privateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      AvailabilityZone: us-east-2a
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value: Private1
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  privateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      AvailabilityZone: us-east-2b
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value: Private2
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  privateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PrivateSubnet3CIDR
+      AvailabilityZone: us-east-2c
+      MapPublicIpOnLaunch: false
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value: Private3
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  rtblAssoc0:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties: 
+      RouteTableId:
+        Ref: rtbResource
+      SubnetId:
+        Ref: publicSubnet1
+  rtblAssoc1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties: 
+      RouteTableId:
+        Ref: rtbResource
+      SubnetId:
+        Ref: publicSubnet2
+
+  # Private subnet routing through NAT gateway
+  RouteNatPrivate:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NatGateway
+  NatGatewayEIP:
+    Type: "AWS::EC2::EIP"
+  NatGateway:
+    Type:  AWS::EC2::NatGateway
+    Description:  Allow lambdas and containers within the VPC to access other services
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - NatGatewayEIP
+          - AllocationId
+      SubnetId:
+        Ref: publicSubnet1
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: vpcResource  
+      Tags:
+        - Key: Name
+          Value: Private Subnet NAT Gateway Route Table
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+
+  Private1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: privateSubnet1
+  Private2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: privateSubnet2
+  Private3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PrivateSubnetRouteTable
+      SubnetId:
+        Ref: privateSubnet3
+
+  igwResource:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  dhcpOptResource:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: ec2.internal
+      DomainNameServers:
+      - AmazonProvidedDNS
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  aclResource:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId:
+        Ref: vpcResource
+  rtbResource:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: vpcResource
+  sgResource:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to the DB from the VPC
+      VpcId:
+        Ref: vpcResource
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  acl15:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Egress: 'true'
+      Protocol: "-1"
+      RuleAction: allow
+      RuleNumber: '100'
+      NetworkAclId:
+        Ref: aclResource
+  acl16:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      Protocol: "-1"
+      RuleAction: allow
+      RuleNumber: '100'
+      NetworkAclId:
+        Ref: aclResource
+  subnetacl23:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      NetworkAclId:
+        Ref: aclResource
+      SubnetId:
+        Ref: publicSubnet1
+  gw6:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: vpcResource
+      InternetGatewayId:
+        Ref: igwResource
+  route8:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId:
+        Ref: rtbResource
+      GatewayId:
+        Ref: igwResource
+    DependsOn: gw6
+  dchpassoc9:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      VpcId:
+        Ref: vpcResource
+      DhcpOptionsId:
+        Ref: dhcpOptResource
+  ingress0:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      SourceSecurityGroupId:
+        Ref: sgResource
+      SourceSecurityGroupOwnerId:
+        Ref: AWS::AccountId
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  ingress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: !Ref SSHLocation
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  #
+  # Allow all traffic between members of this security group
+  #
+  ingress3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      SourceSecurityGroupId:
+        Ref: sgResource
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+  publicSubnetIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      CidrIp: !Ref PublicSubnet1CIDR
+  publicSubnetIngress2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      CidrIp: !Ref PublicSubnet2CIDR
+  privateSubnetIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      CidrIp: !Ref PrivateSubnet1CIDR
+  privateSubnetIngress2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      CidrIp: !Ref PrivateSubnet2CIDR
+  privateSubnetIngress3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: sgResource
+      IpProtocol: -1
+      CidrIp: !Ref PrivateSubnet3CIDR
+
+  #
+  # Create an S3 Bucket Associated with this project (and tied to the creation/deletion of this stack)
+  #
+  s3Bucket:
+    Type: AWS::S3::Bucket
+        
+  #
+  # Lambda function role
+  #
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies: 
+        - 
+          PolicyName: "VpcLambdaPolicy"
+          PolicyDocument: 
+            Statement: 
+              -
+                Effect: "Allow"
+                Action:
+                  - "S3:GetObject*"
+                Resource:
+                  Fn::GetAtt:
+                    - s3Bucket
+                    - Arn
+              -
+                Effect: "Allow"
+                Action:
+                  - "S3:*"
+                # Resource for ListObjects must be "*"
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "SNS:Publish"
+                Resource:  arn:aws:sns:*:*:vpc-topics-*
+              -
+                Effect: "Allow"
+                Action:
+                  - "SQS:*"
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource: "arn:aws:lambda:*:*:function:vpc-lambda-*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "ecs:RunTask"
+                Resource: "arn:aws:ecs:*:*:task-definition/vpc-task-*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "cloudformation:DescribeStacks"
+                Resource: "arn:aws:cloudformation:*:*:stack/vpc-stacks-*/*"  
+
+  #
+  # Network Load Balancer - Can only create a VPC Link using an NLB
+  #
+  # How to use API gateway in front of load balancer
+  # https://aws.amazon.com/about-aws/whats-new/2017/11/amazon-api-gateway-supports-endpoint-integrations-with-private-vpcs/?sc_channel=em&sc_campaign=Launch_2017_reInvent_recap3&sc_medium=em_66769&sc_content=other_la_tier1&sc_country=global&sc_geo=global&sc_category=mult&sc_outcome=other&trk=em_66769&mkt_tok=eyJpIjoiT0dJNU1ETTJNamswTkRZNSIsInQiOiJva3h0anN1ZFlPMFwvSkpzSFJDR2IwTWp0YzBuVnZpcnYrOW4wOVc5cGEyMlVsbG9DVmp3Z1phZURjZjlaNCswXC8wbktXSFh2UDlrWnErR1wvXC9wRTFpMUYwOUNkVUY0RVYyeGZlRzIxYk9ITjkxbEEybmN2OTBGQXJ4M0UzS1FUZHMifQ%3D%3D
+  NetworkLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets:
+      - Ref: privateSubnet1
+      - Ref: privateSubnet2
+      - Ref: privateSubnet3
+      Type: network
+      Tags:
+        - Key: Name
+          Value:
+            Ref: AWS::StackName
+        - Key: CostCenter
+          Value:
+            Ref: CostCenter
+        - Key: CreatedBy
+          Value:
+            Ref: CreatedBy
+        - Key: Project
+          Value:
+            Ref: Project
+        - Key: Production
+          Value:
+            Ref: Production
+
+#
+# Outputs section, so that the other stacks (lambdas, etc) can use this stack
+#
+Outputs:
+  PublicSubnet1:
+    Description: Public Subnet ID
+    Value:
+      Ref: publicSubnet1
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnet1
+  PublicSubnet2:
+    Description: Public Subnet ID
+    Value:
+      Ref: publicSubnet2
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnet2
+  PrivateSubnet1:
+    Description: Private Subnet ID
+    Value:
+      Ref: privateSubnet1
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnet1
+  PrivateSubnet2:
+    Description: Private Subnet ID
+    Value:
+      Ref: privateSubnet2
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnet2
+  PrivateSubnet3:
+    Description: Private Subnet ID
+    Value:
+      Ref: privateSubnet3
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnet3
+  VPCName:
+    Description: VPC Name
+    Value:
+      Ref: vpcResource
+    Export:
+      Name: !Sub ${AWS::StackName}-VPC
+  SecurityGroup:
+    Description: Security Group
+    Value:
+      Ref : sgResource
+    Export:
+      Name: !Sub ${AWS::StackName}-SecurityGroup
+  S3Bucket:
+    Description: S3 Bucket
+    Value:
+      Ref: s3Bucket
+    Export:
+      Name: !Sub ${AWS::StackName}-S3Bucket
+  LambdaRole:
+    Description: Execution role for lambda functions
+    Value:
+      Fn::GetAtt:
+      - LambdaRole
+      - Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-LambdaRole
+  NetworkLoadBalancerEndpoint:
+    Description: Endpoint for the app load balancer
+    Value:
+      Fn::GetAtt:
+      - NetworkLoadBalancer
+      - DNSName
+    Export:
+      Name:  !Sub ${AWS::StackName}-NetworkLoadBalancerEndpoint
+  NetworkLoadBalancerArn:
+    Description: ARN for the app load balancer
+    Value: !Ref NetworkLoadBalancer
+    Export:
+      Name:  !Sub ${AWS::StackName}-NetworkLoadBalancerArn

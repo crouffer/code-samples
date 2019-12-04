@@ -1,0 +1,194 @@
+---
+Description:  Based on reference architecture https://github.com/awslabs/ecs-refarch-cloudformation
+
+Parameters:
+    ApiKey:
+        Description: The API Key for the service
+        Type: String
+        Default: "thisIsAnUndefinedApiKey"
+    VPC:
+        Description: The VPC that the ECS cluster is deployed to
+        Type: AWS::EC2::VPC::Id
+    Cluster:
+        Description: Please provide the ECS Cluster ID that this service should run on
+        Type: String
+    DesiredCount: 
+        Description: How many instances of this task should we run across our cluster?
+        Type: Number
+    DbAddress:
+        Description: Database Server Address
+        Type: String
+    DbName:
+        Description: Database Name
+        Type: String
+    DbUserName:
+        Description: Database User Name
+        Type: String
+    DbPassword:
+        Description: Database Password
+        Type: String
+    S3Bucket:
+        Description: S3 Bucket
+        Type: String
+    LoadBalancer:
+        Description: The Application Load Balancer listener to register with
+        Type: String
+    Path: 
+        Description: The path to register with the Application Load Balancer
+        Type: String
+    ContainerName: 
+        Description: The name of the container
+        Type: String
+        Default: undefined
+    TaskName: 
+        Description: The name of the task to create
+        Type: String
+        Default: undefined
+    MemoryReservation:
+        Description: The amount of memory to reserve for the task
+        Type: Number
+        Default: 256
+    ContainerPort: 
+        Description: The exposed port of the container
+        Type: Number
+    Production:
+      Description: Set to true if this is a production environment
+      Type: String
+      Default: 'false'
+      AllowedValues:
+      - 'true'
+      - 'false'
+    CostCenter:
+        Description: Select the appropriate cost center
+        Type: String
+    Default: development
+    AllowedValues:
+    - development
+    - test
+    - production
+    Project:
+        Description: Name of the project
+        Type: String
+        Default: ServiceName
+    CreatedBy:
+        Description: Name of the creator
+        Type: String
+        Default: Unknown
+
+Resources:
+
+    Service: 
+        Type: AWS::ECS::Service
+        Properties: 
+            Cluster: !Ref Cluster
+            Role: !Ref ServiceRole
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinition
+            LoadBalancers: 
+                - ContainerName: !Ref TaskName
+                  ContainerPort: !Ref ContainerPort
+                  TargetGroupArn: !Ref TargetGroup
+
+    TaskDefinition:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref TaskName
+            NetworkMode: bridge
+            ContainerDefinitions:
+                - Name: !Ref TaskName
+                  Essential: true
+                  Environment:
+                    - Name: AWS_REGION
+                      Value: !Ref AWS::Region
+                    - Name: API_KEY
+                      Value: !Ref ApiKey
+                    - Name: DB_ADDRESS
+                      Value: !Ref DbAddress
+                    - Name: DB_NAME
+                      Value: !Ref DbName
+                    - Name: DB_USERNAME
+                      Value: !Ref DbUserName
+                    - Name: DB_PASSWORD
+                      Value: !Ref DbPassword
+                    - Name: S3_BUCKET
+                      Value: !Ref S3Bucket
+                  Image: !Ref ContainerName
+                  MemoryReservation: !Ref MemoryReservation
+                  PortMappings:
+                    - ContainerPort: !Ref ContainerPort
+                  LogConfiguration:
+                    LogDriver: awslogs
+                    Options:
+                        awslogs-group: !Ref AWS::StackName
+                        awslogs-region: !Ref AWS::Region
+    
+    CloudWatchLogsGroup:
+        Type: AWS::Logs::LogGroup
+        Properties: 
+            LogGroupName: !Ref AWS::StackName
+            RetentionInDays: 14
+
+    # Note, there is a problem with the healthcheck interval.  https://forums.aws.amazon.com/thread.jspa?threadID=271405
+    TargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VPC
+            Port: 80
+            Protocol: TCP
+            HealthCheckIntervalSeconds: 10
+            HealthCheckPath:
+                Fn::Join:
+                - '/'
+                - - !Ref Path
+                  - 'healthcheck/'
+            HealthCheckProtocol: HTTP
+
+    Listener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties:
+        DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            !Ref TargetGroup    
+        LoadBalancerArn:
+          !Ref LoadBalancer
+        Port: !Ref ContainerPort
+        Protocol: TCP
+
+    # This IAM Role grants the service access to register/unregister with the 
+    # Application Load Balancer (ALB). It is based on the default documented here:
+    # http://docs.aws.amazon.com/AmazonECS/latest/developerguide/service_IAM_role.html
+    ServiceRole: 
+        Type: AWS::IAM::Role
+        Properties: 
+            RoleName: !Sub ecs-service-${AWS::StackName}
+            Path: /
+            AssumeRolePolicyDocument: |
+                {
+                    "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": { "Service": [ "ecs.amazonaws.com" ]},
+                        "Action": [ "sts:AssumeRole" ]
+                    }]
+                }
+            Policies: 
+                - PolicyName: !Sub ecs-service-${AWS::StackName}
+                  PolicyDocument: 
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ec2:AuthorizeSecurityGroupIngress",
+                                    "ec2:Describe*",
+                                    "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                    "elasticloadbalancing:Describe*",
+                                    "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                                    "elasticloadbalancing:DeregisterTargets",
+                                    "elasticloadbalancing:DescribeTargetGroups",
+                                    "elasticloadbalancing:DescribeTargetHealth",
+                                    "elasticloadbalancing:RegisterTargets"
+                                ],
+                                "Resource": "*"
+                        }]
+                    }

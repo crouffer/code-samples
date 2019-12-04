@@ -1,0 +1,457 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+# TODO:  Use private subnets, and NAT gateway so cluster is not available to public internet:
+# https://www.topcoder.com/blog/aws-container-services-private-subnets-tutorial/
+
+# ACL for public-private subnets: https://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_Appendix_NACLs.html#VPC_Appendix_NACLs_Scenario_2
+
+# See reference implementation:  https://raw.githubusercontent.com/awslabs/ec2-spot-labs/master/ecs-ec2-spot-fleet/ecs-ec2-spot-fleet.yaml
+Description: CloudFormation template for running an ECS cluster on EC2 Spot Instances.  Includes EC2 Spot Instance termination notice handler script.
+
+# Use instance weighting to ensure that capacity matches demand:  https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-fleet.html#instance-weighting-walkthrough
+Mappings:
+  # AMI Name: amzn-ami-2018.03.i-amazon-ecs-optimized
+  ecsOptimizedAmi:
+    us-east-2:
+      AMI: ami-XXXXXXXXXXXXXXXX
+Metadata:
+  Authors:
+    Description: Chris Rouffer (chris.rouffer@gmail.com)
+  License:
+    Description: 'MIT'
+Outputs:
+  awsRegionName:
+    Description: The name of the AWS Region your template was launched in
+    Value:
+      Ref: AWS::Region
+  cloudWatchLogsGroupName:
+    Description: Name of the CloudWatch Logs Group
+    Value:
+      Ref: cloudWatchLogsGroup
+  ecsClusterName:
+    Description: The name of the ECS cluster
+    Value:
+      Ref: ecsCluster
+  snsTopic:
+    Description: SNS Topic ARN
+    Value:
+      Ref: snsTopic
+  spotFleetRequestId:
+    Description: The Spot fleet Request Id
+    Value:
+      Ref: spotFleet
+Parameters:
+  ScriptBucket:
+    Type: String
+  ScriptKey:
+    Type: String
+  EcsClusterTargetCapacity:
+    Default: 4
+    Description: Target capacity for the cluster.  This is roughly equivalent to the number of virtual CPUs
+    Type: Number
+  SpotBidPrice:
+    Default: 0.1
+    Description: Spot Instance bid price
+    Type: String
+  SSHLocation:
+    Description: " The IP address range that can be used to SSH or RDP to the EC2
+      instances"
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 111.222.333.444/32
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  NetworkStack:
+    Description: Name of an existing CloudFormation stack where the server will be deployed
+    Type: String
+    Default: MyVpcStackName
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  Production:
+    Description: Set to true if this is a production environment
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  CostCenter:
+    Description: Select the appropriate cost center
+    Type: String
+    Default: development
+    AllowedValues:
+    - development
+    - test
+    - production
+  Project:
+    Description: Name of the project
+    Type: String
+    Default: MyProjectName
+  CreatedBy:
+    Description: Name of the creator
+    Type: String
+    Default: Unknown
+
+Resources:
+  cloudWatchLogsGroup:
+    Properties:
+      RetentionInDays: 7
+    Type: AWS::Logs::LogGroup
+  ecsCluster:
+    Type: AWS::ECS::Cluster
+  snsTopic:
+    Type: AWS::SNS::Topic
+  spotFleet:
+    Type: AWS::EC2::SpotFleet
+    DependsOn:
+    - spotFleetRole
+    - spotFleetInstanceProfile
+    - ecsCluster
+    Properties:
+      SpotFleetRequestConfigData:
+        AllocationStrategy: lowestPrice
+        IamFleetRole:
+          Fn::GetAtt:
+          - spotFleetRole
+          - Arn
+        LaunchSpecifications:
+        # LaunchSpecification 1: m4.large
+        - IamInstanceProfile:
+            Arn:
+              Fn::GetAtt:
+              - spotFleetInstanceProfile
+              - Arn
+          ImageId:
+            Fn::FindInMap:
+            - ecsOptimizedAmi
+            - Ref: AWS::Region
+            - AMI
+          InstanceType: m4.large
+          WeightedCapacity: 2
+          KeyName:
+            Ref: KeyName
+          Monitoring:
+            Enabled: true
+          SecurityGroups:
+            - GroupId:
+                Fn::ImportValue:
+                  Fn::Sub: "${NetworkStack}-SecurityGroup"
+          SubnetId:
+            Fn::Join:
+            - ','
+            - - Fn::ImportValue:
+                  Fn::Sub: "${NetworkStack}-PrivateSubnet1"
+              - Fn::ImportValue:
+                  Fn::Sub: "${NetworkStack}-PrivateSubnet2"
+              - Fn::ImportValue:
+                  Fn::Sub: "${NetworkStack}-PrivateSubnet3"
+          UserData: !Base64
+              Fn::Join:
+                - ''
+                - - |
+                    #!/bin/bash -xe
+                  - |
+                    # Running security updates
+                  - 'yum -y --security update'
+                  - |+
+
+                  - |
+                    # Example: Add an entry to the hosts file
+                  - 'echo "111.222.333.444    my.hostname.is.here" >> /etc/hosts'
+                  - |+
+
+                  - |
+                    # Installing pip
+                  - 'easy_install pip'
+                  - |+
+
+                  - |
+                    # Add pip to path
+                  - 'export PATH=/usr/local/bin:$PATH'
+                  - |+
+
+                  - |
+                    # Installing awscli
+                  - 'pip install awscli'
+                  - |+
+
+                  - |
+                  - 'export AWS_REGION='
+                  - !Ref AWS::Region
+                  - |+
+
+                  - |
+                  - 'export LOG_GROUP='
+                  - !Ref cloudWatchLogsGroup
+                  - |+
+
+                  - |
+                  - 'export ECS_CLUSTER='
+                  - !Ref ecsCluster
+                  - |+
+
+                  - |
+                    # Running ecs-userdata.sh from s3 source
+                  - 'aws s3 cp s3://'
+                  - !Ref ScriptBucket
+                  - !Ref ScriptKey
+                  - ' - | bash -s'
+                  - |+
+        # LaunchSpecification 2: m4.xlarge
+#        - IamInstanceProfile:
+#            Arn:
+#              Fn::GetAtt:
+#              - spotFleetInstanceProfile
+#              - Arn
+#          ImageId:
+#            Fn::FindInMap:
+#            - ecsOptimizedAmi
+#            - Ref: AWS::Region
+#            - AMI
+#          InstanceType: m4.xlarge
+#          WeightedCapacity: 4
+#          KeyName:
+#            Ref: KeyName
+#          Monitoring:
+#            Enabled: true
+#          SecurityGroups:
+#            - GroupId:
+#                Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-SecurityGroup"
+#          SubnetId:
+#            Fn::Join:
+#            - ','
+#            - - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet1"
+#              - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet2"
+#              - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet3"
+#          UserData: !Base64
+#              Fn::Join:
+#                - ''
+#                - - |
+#                    #!/bin/bash -xe
+#                  - |
+#                    # Running security updates
+#                  - 'yum -y --security update'
+#                  - |+
+#
+#                  - |
+#                    # Installing pip
+#                  - 'easy_install pip'
+#                  - |+
+#
+#                  - |
+#                    # Add pip to path
+#                  - 'export PATH=/usr/local/bin:$PATH'
+#                  - |+
+#
+#                  - |
+#                    # Installing awscli
+#                  - 'pip install awscli'
+#                  - |+
+#
+#                  - |
+#                  - 'export AWS_REGION='
+#                  - !Ref AWS::Region
+#                  - |+
+#
+#                  - |
+#                  - 'export LOG_GROUP='
+#                  - !Ref cloudWatchLogsGroup
+#                  - |+
+#
+#                  - |
+#                  - 'export ECS_CLUSTER='
+#                  - !Ref ecsCluster
+#                  - |+
+#
+#                  - |
+#                    # Running ecs-userdata.sh from s3 source
+#                  - 'aws s3 cp s3://'
+#                  - !Ref ScriptBucket
+#                  - !Ref ScriptKey
+#                  - ' - | bash -s'
+#                  - |+
+        # LaunchSpecification 3: m4.2xlarge
+#        - IamInstanceProfile:
+#            Arn:
+#              Fn::GetAtt:
+#              - spotFleetInstanceProfile
+#              - Arn
+#          ImageId:
+#            Fn::FindInMap:
+#            - ecsOptimizedAmi
+#            - Ref: AWS::Region
+#            - AMI
+#          InstanceType: m4.2xlarge
+#          WeightedCapacity: 8
+#          KeyName:
+#            Ref: KeyName
+#          Monitoring:
+#            Enabled: true
+#          SecurityGroups:
+#            - GroupId:
+#                Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-SecurityGroup"
+#          SubnetId:
+#            Fn::Join:
+#            - ','
+#            - - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet1"
+#              - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet2"
+#              - Fn::ImportValue:
+#                  Fn::Sub: "${NetworkStack}-PrivateSubnet3"
+#          UserData: !Base64
+#              Fn::Join:
+#                - ''
+#                - - |
+#                    #!/bin/bash -xe
+#                  - |
+#                    # Running security updates
+#                  - 'yum -y --security update'
+#                  - |+
+#
+#                  - |
+#                    # Installing pip
+#                  - 'easy_install pip'
+#                  - |+
+#
+#                  - |
+#                    # Add pip to path
+#                  - 'export PATH=/usr/local/bin:$PATH'
+#                  - |+
+#
+#                  - |
+#                    # Installing awscli
+#                  - 'pip install awscli'
+#                  - |+
+#
+#                  - |
+#                  - 'export AWS_REGION='
+#                  - !Ref AWS::Region
+#                  - |+
+#
+#                  - |
+#                  - 'export LOG_GROUP='
+#                  - !Ref cloudWatchLogsGroup
+#                  - |+
+#
+#                  - |
+#                  - 'export ECS_CLUSTER='
+#                  - !Ref ecsCluster
+#                  - |+
+#
+#                  - |
+#                    # Running ecs-userdata.sh from s3 source
+#                  - 'aws s3 cp s3://'
+#                  - !Ref ScriptBucket
+#                  - !Ref ScriptKey
+#                  - ' - | bash -s'
+#                  - |+
+        ReplaceUnhealthyInstances: true
+        SpotPrice:
+          Ref: SpotBidPrice
+        TargetCapacity:
+          Ref: EcsClusterTargetCapacity
+        TerminateInstancesWithExpiration: true
+        Type: maintain
+
+
+  spotFleetInstanceProfile:
+    DependsOn:
+    - spotFleetInstanceRole
+    Properties:
+      Path: /
+      Roles:
+      - Ref: spotFleetInstanceRole
+    Type: AWS::IAM::InstanceProfile
+  spotFleetInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Path: /
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - ecs:UpdateContainerInstancesState
+            Effect: Allow
+            Resource: '*'
+          Version: 2012-10-17
+        PolicyName: ecsUpdateContainerInstancesStatePolicy
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:DescribeLogStreams
+            Effect: Allow
+            Resource: arn:aws:logs:*:*:*
+          Version: 2012-10-17
+        PolicyName: cloudWatchLogsPolicy
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - sns:Publish
+            Effect: Allow
+            Resource:
+              Ref: snsTopic
+          Version: 2012-10-17
+        PolicyName: snsPublishPolicy
+      # TODO:  Add other permissions if needed
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - s3:ListBucket
+            Effect: Allow
+            Resource:
+              Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref ScriptBucket
+          Version: 2012-10-17
+        PolicyName: listBucketContents
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - s3:GetObject
+            Effect: Allow
+            Resource:
+              Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref ScriptBucket
+                - !Ref ScriptKey
+          Version: 2012-10-17
+        PolicyName: getScriptKeyContents
+  spotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - spotfleet.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetRole
+      Path: /
